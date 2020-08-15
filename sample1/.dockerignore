@@ -1,0 +1,7 @@
+# for all code you usually don't want .git history
+.git
+# You usually don't want dockerfiles and compose files in containers
+*Dockerfile*
+*docker-compose*
+# for Node.js apps, you want to build the node-modules
+node_modules
