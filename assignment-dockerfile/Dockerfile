@@ -11,7 +11,7 @@ COPY  package.json package.lock*.json ./
 
 RUN  npm install && npm cache clean --force
 
-COPY --chown=node:node . .
+COPY . .
 
 ENTRYPOINT ["/sbin/tini", "--"]
 

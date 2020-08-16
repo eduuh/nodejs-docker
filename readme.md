@@ -262,5 +262,13 @@ example of a nice docker file
 - Install tine, start node with tini.
 - copy package/lock files first then npm, then copy.
 
+##### > Docker keeps all version tags around since deleting them would cause stuff in production to fail.
 
+##### Testing Graceful Shutdowns.
 
+- Use ./assignment-dockerfiles/
+- Run with tini built in, try to **ctrl-c**
+- Run with tini built in, try to stop.
+- Remove EntryPoint , rebuild.
+- Add --init to run command, ctrl-c/stop
+- Bonus: add signal watch code.
