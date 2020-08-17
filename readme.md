@@ -470,6 +470,17 @@ You will need to build images manually due to the fact that this in not yet supp
 
 - check ./sample-buildkit-ssh
 
+if you ever change a Dockerfile line before the **Run npm install line** or you change your **package.json or lock file, Docker will need to re-run** npm install build. Docker , by default, won't re-use package manager download caches line the NPM cache.
+
+If you have large package.json file with slow dependency install due to large downloads you can speed up rebuilds by enabling buildkit caching feature on specific directories inside your docker builds.
+
+To set this up for re-using the NPM download cache.
+
+1. add this as the first line in our Dockerfile: **# syntax = docker/dockerfiles:experimental**
+2. Start your Dockerfile npm instal line with: **RUN --mount=type=cache target/root/.npm/\_cacache**
+
+Look at
+
 #### Cloud Native App Guidelines.
 
 - Follow 12factor.net priciples, especially
@@ -538,3 +549,71 @@ You will need to build images manually due to the fact that this in not yet supp
 - Running contaner with **./in** and **./out** bind-mounts results in new chalk images in \*/.out\*\* on host.
 - Changing **--env** CHARCOAL_FACTOR changes
 - Docker logs shows winston outputs.
+
+```dockerfile
+FROM node:8
+
+RUN apt-get install -y graphicsmagick`
+
+WORKDIR app/
+
+COPY package*.json ./
+
+RUN npm install && npm cache clean --force
+
+COPY . .
+# setting environment variables
+ENV CHARCOALFACTOR=0.1
+
+CMD ["node", "index.js"]
+```
+
+- Building an images from the docker file
+  - **docker build . -t mta**
+- Running this project using **bindmounts**
+  - **docker run -v ${pwd}/in:/app/in -v $(pwd)/out:/app/out --env CHARCOAL_FACTOR=1 mta**
+- Check inside a running images.
+  - **docker exec --it mta**
+- Check logs of the runnig container.
+  - **docker logs all**
+
+#### Compose for Local Development.
+
+- Best local setup
+- Use Compose features.
+- Tips and Tricks.
+
+##### Compose Project Tips: Do's
+
+- cd ./compose-tips.
+- Do use **docker-compose** for local dev
+- do use **version 2** . for local dev.
+- V2 only: depents_on, hardware specific.
+
+#### Compose Project Tips: Don'ts (folder: compose-tips)
+
+Read the yaml in the said folder.
+
+> This are te dont's
+
+- Unnecessary: "alias" & "container_name"
+- Legacy: "expose" & "links"
+  - All container in the same networks are exposed to each others.
+  - Don't set up defaults settings, i.e using network bridge.
+- BAD: if bind-mounting folders or files to host, always use relative file
+  - paths (starting with .). This makes your compose file reusable for others, and won't break if you move your project around.
+    - Note: everybody will have unique path.
+- BAD: don't bind-mount databases to host OS. You'll get bad performance and many times it won't even work. Best to use named volumes.
+- For local dev only? don't copy in code.
+- DDforWin needs drive perms
+  - Perms: Linux != Windows
+
+> Bind-Mounting = Perfomance
+> docker-bg-sync
+
+##### node_modules in images. (folder: sails)
+
+- Problem: we shouldn't build images with **node_modules** from host.
+  - Example: **node-gyp**
+- Solution: add **node_modules** to **.dockerignore**
+- let's do this to **sails**
