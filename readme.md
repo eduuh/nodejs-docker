@@ -923,7 +923,6 @@ Since we are using nodemon. We expose this port using _nodemon.json_
   "ignore": ["src/**/*.spec.ts"],
   "exec": "node --inspect=0.0.0.0:9229 -r ts-node/register ./src/app.ts"
 }
-
 ```
 
 Since we are configurin typescript. I still have a **tsconfig.json**
@@ -986,9 +985,7 @@ of the "result" app using all the things you learned in this section.
 - Use VS Code or another editor with debugger (or Chrome) to connect to debugger
 - Goto vote.localhost and result.localhost and ensure you can vote and see result
 
-
 ```yml
-
 version: "2.4"
 
 services:
@@ -1074,4 +1071,228 @@ volumes:
   db-data:
 ```
 
-### Making Images Production Ready
+### Making Images Production Ready (folder: multi-stage-deps)
+
+- Avoiding devDependecies In Prod.
+  - Multi-stage can solve this
+  - prod stages **npm i --only=production**
+  - Dev stage: **npm i --only=development**
+  - Use **npm ci** to speed up builds.
+- Ensure **NODE_ENV** is set.
+
+Dockerfile.
+
+```dockerfile
+## Stage 1 (production base)
+# This gets our prod dependencies installed and out of the way
+FROM node:10-alpine as base
+
+EXPOSE 3000
+
+ENV NODE_ENV=production
+
+WORKDIR /opt
+
+COPY package*.json ./
+
+# we use npm ci here so only the package-lock.json file is used
+RUN npm ci \
+    && npm cache clean --force
+
+
+## Stage 2 (development)
+# we don't COPY in this stage because for dev you'll bind-mount anyway
+# this saves time when building locally for dev via docker-compose
+FROM base as dev
+
+ENV NODE_ENV=development
+
+ENV PATH=/opt/node_modules/.bin:$PATH
+
+WORKDIR /opt
+
+RUN npm install --only=development
+
+WORKDIR /opt/app
+
+CMD ["nodemon", "./bin/www", "--inspect=0.0.0.0:9229"]
+
+
+## Stage 3 (copy in source for prod)
+# This gets our source code into builder
+# this stage starts from the first one and skips dev
+FROM base as prod
+
+WORKDIR /opt/app
+
+COPY . .
+
+CMD ["node", "./bin/www"]
+```
+
+docker-compose.yml
+
+```yml
+version: "2.4"
+
+services:
+  web:
+    init: true
+    build:
+      context: .
+      target: dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/opt/app:delegated
+      - /opt/app/node_modules
+```
+
+### Dockerfiles comments, Arguments
+
+- Document every line that isn't obvious.
+- From stage, document why it's needed.
+- COPY = don't document.
+- RUN = maybe document.
+- Add LABELS
+- RUN **npm config list**
+
+#### Example Dockerfiles Labels (folder: dockerfile-labels)
+
+- lABEL has OCI standards now.
+  - LABEL **org.opencontainers.image.<key>**
+- Use ARG to add info to Labels like build date or git commit.
+- Docker Hub has built-in envvars for use with ARGs.
+
+```dockerfile
+FROM node:10
+
+# set this with shell variables at build-time.
+# If they aren't set, then not-set will be default.
+ARG CREATED_DATE=not-set
+ARG SOURCE_COMMIT=not-set
+
+# labels from https://github.com/opencontainers/image-spec/blob/master/annotations.md
+LABEL org.opencontainers.image.authors=bret@bretfisher.com
+LABEL org.opencontainers.image.created=$CREATED_DATE
+LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
+LABEL org.opencontainers.image.title="Sample Node.js Dockerfile with LABELS"
+LABEL org.opencontainers.image.url=https://hub.docker.com/r/bretfisher/jekyll
+LABEL org.opencontainers.image.source=https://github.com/BretFisher/udemy-docker-mastery-for-nodejs
+LABEL org.opencontainers.image.licenses=MIT
+LABEL com.edwin.nodeversion=$NODE_VERSION
+
+WORKDIR /app
+
+COPY index.js .
+
+CMD ["node", "index.js"]
+```
+
+##### Compose Files Documentation.
+
+- YAML (unlike Json) support comments!
+- Document objects that aren't obvious.
+  - why a volume is needed.
+  - Why custom Cmd is needed.
+- Template blocks at top.
+- Override objects and files.
+
+##### Run Test During Image Build. (folder multistage-test)
+
+- **RUN npm test** in a specific build stage in a multistage dockerfile.
+  - Also good for linting commands.
+- Only run Unit test in build
+- Test stage not default.
+- Locally, run **docker-compose** run node npm test
+
+```dockerfile
+
+## Stage 1 (production base)
+# This gets our prod dependencies installed and out of the way
+FROM node:10-alpine as base
+
+EXPOSE 3000
+
+ENV NODE_ENV=production
+
+WORKDIR /opt
+
+COPY package*.json ./
+
+# we use npm ci here so only the package-lock.json file is used
+RUN npm config list \
+    && npm ci \
+    && npm cache clean --force
+
+
+## Stage 2 (development)
+# we don't COPY in this stage because for dev you'll bind-mount anyway
+# this saves time when building locally for dev via docker-compose
+FROM base as dev
+
+ENV NODE_ENV=development
+
+ENV PATH=/opt/node_modules/.bin:$PATH
+
+WORKDIR /opt
+
+RUN npm install --only=development
+
+WORKDIR /opt/app
+
+CMD ["nodemon", "./bin/www", "--inspect=0.0.0.0:9229"]
+
+
+## Stage 3 (copy in source)
+# This gets our source code into builder for use in next two stages
+# It gets its own stage so we don't have to copy twice
+# this stage starts from the first one and skips the last two
+FROM base as source
+
+WORKDIR /opt/app
+
+COPY . .
+
+
+## Stage 4 (testing)
+# use this in automated CI
+# it has prod and dev npm dependencies
+# In 18.09 or older builder, this will always run
+# In BuildKit, this will be skipped by default
+FROM source as test
+
+ENV NODE_ENV=development
+ENV PATH=/opt/node_modules/.bin:$PATH
+
+# this copies all dependencies (prod+dev)
+COPY --from=dev /opt/node_modules /opt/node_modules
+
+# run linters as part of build
+# be sure they are installed with devDependencies
+RUN eslint .
+
+# run unit tests as part of build
+RUN npm test
+
+# run integration testing with docker-compose later
+CMD ["npm", "run", "int-test"]
+
+
+## Stage 5 (default, production)
+# this will run by default if you don't include a target
+# it has prod-only dependencies
+# In BuildKit, this is skipped for dev and test stages
+FROM source as prod
+
+CMD ["node", "./bin/www"]
+
+```
+
+- build the test image you run the command that targets the stage **test**
+  docker build -t test --target test .
+
+#### Security Scanning and Audit
+
+- Use test stage in multi-stage, or new
+- Or run it once image is build with CI
