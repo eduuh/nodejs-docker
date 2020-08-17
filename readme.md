@@ -780,11 +780,298 @@ services:
   - Bad: could spike Cpu with restart cycling.
 - **Solution** build connection timeouts, buffer and retries in your apps.
 
-###### HealthChecks for depends_on.
+###### HealthChecks for depends_on.(folder: depends-on)
 
 - **depends_on**: is only dependency control by default.
 - Add v2 healthchecks for true "**wait_for**"
 - Let's see some examples
+
   - Mongo
   - Postgress/MySql
   - web
+
+```yml
+version: "2.4"
+
+services:
+  frontend:
+    image: nginx
+    depends_on:
+      api:
+        # this requires a compose file version => 2.3 and < 3.0
+        condition: service_healthy
+
+  api:
+    image: node:alpine
+    healthcheck:
+      test: curl -f http://127.0.0.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+
+  postgres:
+    image: postgres
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: pg_isready -U postgres -h 127.0.0.1
+
+  mongo:
+    image: mongo
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+
+  mysql:
+    image: mysql
+    healthcheck:
+      test: mysqladmin ping -h 127.0.0.1
+    environment:
+      - MYSQL_ALLOW_EMPTY_PASSWORD=true
+```
+
+The above example uses preexisting images to compose this **docker-compose** file.
+
+- Each container depends on another container.
+- To esure all the container are spined up in the correct order. There is an **depends_on**.
+- To esure all the container play nicely together, all of them has a **healhcheck**
+
+##### Making microservices Easier.
+
+- Problem: many HTTP endpoints, man ports.
+- Solution: Nginx/HAProxy/Traefik for host header routing + wildcard localhost domain.
+- Problem: CORS failures in dev.
+- Solution: Proxy with \* header
+- Problem: HTTPS locally
+- Solution: Create local proxy Certificates.
+
+##### Local DNS For Many EndPoints.
+
+- Problem: Multiple endpoints an need unique Dns for each. in order of preference.
+  - Use x.localhost, y.localhost in chrome.
+  - Use wilcard domains like
+    \*.vcap.me or xip.io
+  - Use **dnsmasq** on macOS/linux
+  - Manually edit host file.
+
+#### Vc code, Debugging, and TypeScript. (folder: typescript)
+
+- Vs code and other editors have some **Docker and compose features built-in**
+- Debugging works when we enable in nodemon and remote via TCP.
+- TypeScript compile and other **pre-processors** go in **nodemon.json**.
+
+```dockerfile
+# a base stage for all future stages
+# with only prod dependencies and
+# no code yet
+FROM node:10-slim as base
+ENV NODE_ENV=production
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --only=production \
+    && npm cache clean --force
+ENV PATH /app/node_modules/.bin:$PATH
+
+# a dev and build-only stage. we don't need to
+# copy in code since we bind-mount it
+FROM base as dev
+ENV NODE_ENV=development
+RUN npm install --only=development
+# run nodemon. It will use the nodemon.json file for configurations.
+CMD ["/app/node_modules/.bin/nodemon"]
+
+FROM dev as build
+COPY . .
+RUN tsc
+# you would also run your tests here
+
+# this only has minimal deps and files
+FROM base as prod
+COPY --from=build /app/dist/ .
+CMD ["node", "app.js"]
+```
+
+```dockerfile
+node_modules/
+```
+
+```yml
+version: "2.4"
+
+services:
+  ts:
+    build:
+      context: .
+      target: dev
+    ports:
+      - "3000:3000"
+      - "9229:9229"
+    volumes:
+      - .:/app
+```
+
+Note: we expose port **9229** for node-debugging.
+Since we are using nodemon. We expose this port using _nodemon.json_
+
+```json
+{
+  "watch": ["src"],
+  "ext": "ts",
+  "ignore": ["src/**/*.spec.ts"],
+  "exec": "node --inspect=0.0.0.0:9229 -r ts-node/register ./src/app.ts"
+}
+
+```
+
+Since we are configurin typescript. I still have a **tsconfig.json**
+
+```json
+{
+  "include": [
+    "src/**/*     /*Location of my typscript files*/
+  ],
+
+  "compilerOptions": {
+    "target": "es5",
+    "module": "commonjs",
+    "sourceMap": true,
+    "outDir": "dist",
+    "strict": true,
+    "noImplicitAny": false,
+    "esModuleInterop": true                    }
+  }
+}
+```
+
+#### Building A sweet Compose File. (folder: sweet-compose)
+
+- Take all the learning from this section and apply it to a single compose file!
+- Use Docker's example voting app (Dog vs. Cat)
+
+You are the Node.js developer for the "Dog vs. Cat voting app" project.
+You are given a basic docker-compose.yml and the source code for the "result"
+Node.js app (sub directory of this dir).
+
+Goal: take the docker-compose.yml in this directory, which uses the docker
+voting example distributed app, and make it more awesome for local development
+of the "result" app using all the things you learned in this section.
+
+## The finished compose.yml should include:
+
+- Set the compose file version to the latest 2.x (done for you)
+- Healthcheck for postgres, taken from the depends_on lecture
+- Healthcheck for redis, test command is "redis-cli ping"
+- vote service depends on redis service
+- result service depends on db service
+- worker depends on db and redis services
+- remember to add the service_healthy to depends on objects
+- result is a node app in subdirectory result. Let's bind-mount that
+- result should be built from the Dockerfile in ./result/
+- Add a traefik proxy service from proxy lecture example. Have it run
+  on a published port of your choosing and direct vote.localhost and
+  result.localhost to their respective services so you can use Chrome
+- Add nodemon to the result service based on file watching lecture. You
+  may need to get nodemon into the result image somehow.
+- Enable NODE_ENV=development mode for result
+- Enable debug and publish debug port for result
+
+## Things to test once finished to ensure it's working:
+
+- Edit ./result/server.js, save it, and ensure it restarts
+- Ensure you never see "Waiting for db" in docker-compose logs, which happens
+  when vote or result are waiting on db or redis to start
+- Use VS Code or another editor with debugger (or Chrome) to connect to debugger
+- Goto vote.localhost and result.localhost and ensure you can vote and see result
+
+
+```yml
+
+version: "2.4"
+
+services:
+  traefik:
+    image: traefik:1.7-alpine
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8080:80"
+    command:
+      - --docker
+      - --docker.domain=traefik
+      - --docker.watch
+      - --api
+      - --defaultentrypoints=http,https
+    labels:
+      - traefik.port=8080
+      - traefik.frontend.rule=Host:traefik.localhost
+    networks:
+      - frontend
+      - backend
+
+  redis:
+    image: redis:alpine
+    networks:
+      - frontend
+    healthcheck:
+      test: redis-cli ping
+
+  db:
+    image: postgres:9.6
+    environment:
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: pg_isready -h 127.0.0.1
+
+  vote:
+    image: bretfisher/examplevotingapp_vote
+    networks:
+      - frontend
+    depends_on:
+      redis:
+        condition: service_healthy
+    labels:
+      - traefik.port=80
+      - traefik.frontend.rule=Host:vote.localhost
+
+  result:
+    build:
+      context: ../result
+    command: nodemon index.js
+    volumes:
+      - ../result:/app
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    labels:
+      - traefik.port=80
+      - traefik.frontend.rule=Host:result.localhost
+
+  worker:
+    image: bretfisher/examplevotingapp_worker:java
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+networks:
+  frontend:
+  backend:
+
+volumes:
+  db-data:
+```
+
+### Making Images Production Ready
