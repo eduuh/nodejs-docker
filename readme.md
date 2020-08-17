@@ -311,7 +311,7 @@ CMD ["node", "app.js"]
 
 ##### Testing Graceful ehutdowns.
 
-- Use ./assignment-dockerfiles/
+- Use ./dockerfiles/
 - Run with tini built in, try to **ctrl-c**
 - Run with tini built in, try to stop.
 - Remove EntryPoint , rebuild.
@@ -402,7 +402,73 @@ RUN npm test
   - **docker build -t multistage:dev --target dev . && docker run multistage --init -p 3000:3000 multistage:dev**
 
 - To run the test container layer.
+
   - **docker build -t multistage:test --target test . && docker run --init -p 3000:3000 multistage:test**
+
+#### BuildKit
+
+- Buildkit. It's a new way to build your images, and a replacement "build engine"
+- It is an optinal feature with quite a few benefits over traditional docker build commands.
+
+- Buildkit doesn't work with **docker-compose** so it can't be used for local development.
+
+- Break up your local dev workflow into manual steps such as:
+
+1. Use docker build commands for node.js image.
+2. Then use docker-compose for the rest.
+
+#### Benefits.
+
+- Most images builds will be faster.
+- Some re-builds will be much faster.
+- It ignores stages in multi-stage that aren't needed. This saves considerable time once you have many stages for different uses.
+- Mount host paths and **secrets during builds** so they are never stored in images.
+- Mount host **ssh-agents so builds can use your private keys** for private NPM modulse witho copying to images.
+- Mount **package manager caches** so they can reuse package downloads between builds (apt, apk, yum, npm, yarn, etc)
+- Future: add features to buildKit "frontends" without needing a new version of Docker. We can control BuildKit version in DockerFile(optional.)
+
+#### Limitations.
+
+- No windows Container support yet (only works in Linux container)
+- No **docker-compose** support yet.
+- No UCP (Docker Enterprise) support yet
+- Various registry limitation including using private or insecure registries (fixes in progress.)
+  -Bugs are still being discoverde and worked on at **moby/buidkit**
+- Not enabled by default.
+- Some features require enabling experimental mode in Docker Engine.
+- some features require Dockerfile command that are not backwords-compatible.
+
+##### How to Enable it
+
+You can set an environment variable **DOCKER_BUILDKIT=1** to enable it for your current shell, and update the docker engine config to enable it permanently when you're ready to got in on Buildkit.
+
+- Enable in Bash/zsh and Toolbox's Quickstart Terminal with: ** export DOCKER_BUIDKIT=1**
+- Enable in PowerShell with : \*_\$env:DOCKER_BUIDKIT=1_
+- Optnally , enable **permanently** in Docker Desktop by updating prefereces/settings **Daemon advanced" Json of {"features: {"buildkit": true}}**
+- Enable **permanently** in Linux host bu updating the **/etc/docker/daemon.json** file with **{"features: {"buildkit": true}}**
+
+##### Using BuildKit to Enable SSD Keys for Private Npm Repositories.
+
+If you Node project has private git repos for node modules, it'll need a particular setup so **ssh** can be used when building the images.
+
+> The previous solution before Buildkit was:
+
+1. use multi-stage builds.
+2. COPY a decrypetd-private-key in to an early stage where npm install is run.
+3. COPY the node_modules from that stage to a new image that doesn't include the key.
+
+That solution worked if your're ok with having the ssh key stored in your local docker engine images, but if wasn't ideal, and didn't work with encrypted ssh kes that required a passphrase.
+
+> The new way is to use BuildKit with the ssh-agent feature, and is much more secure.
+
+1. Setup **ssh-agent** and your keys on the host OS like normal.
+2. Add this as the first line in our Dockerfile: # **syntax = docker/dockerfiles:experimental**
+3. Start our **Dockerfile** npm install line with this : **RUN --mount=type=ssh**
+4. Run docker build with **--ssh default** as an additional option to enable the feature for that build.
+
+You will need to build images manually due to the fact that this in not yet support by **docker-compose.yml**
+
+- check ./sample-buildkit-ssh
 
 #### Cloud Native App Guidelines.
 
@@ -423,6 +489,52 @@ RUN npm test
   - Twelve factors to consider when developing or designing distributed apps.
 
 - 12factor.net/config
+
   - Store environment config in Environment Variable (env vars)
   - Docker & Compose are great at this with multiple options.
   - Old apps: Use CMD or ENTRYPOINT script with **envsubst** to pass env vars into conf files.
+
+#### 12 Factor: Logs
+
+- Apps shouldn't route or transport logs to anything but stdout/stderr.
+- **console.log()** works.
+- Winston/Bunyan/Morgan: use levels to control verbosity.
+- Winston transport: "console"
+
+### .dockerignore.
+
+- Prevent bload and unneeded files.
+
+  - .git/
+  - node_modules/
+  - npm-debug
+  - docker-compose\*.yml
+
+- Not needed but useful in Image
+  - Dockerfiles
+  - README.md
+
+#### Migrating Traditional Apps (MTA)
+
+- "Traditional App" = Pre-Dcoker App.
+- Take a typical Nod app and "migrates"
+
+- using ./mta
+- Add .dockerignore
+- Create Dockerfile
+- Change Winston transport to Console.
+
+##### MTA Requirements.
+
+- See README.md for app details.
+- Image shouldn't include **in , out, node_modules or logs** directories
+- Change Winston to Console
+  - **winston.transports.console**
+- bind-mout in and out dirs
+- Set CHARCOAL_FACTOR to 0.1
+
+##### MTA OUTcomes
+
+- Running contaner with **./in** and **./out** bind-mounts results in new chalk images in \*/.out\*\* on host.
+- Changing **--env** CHARCOAL_FACTOR changes
+- Docker logs shows winston outputs.
