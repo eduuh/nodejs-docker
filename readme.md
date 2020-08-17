@@ -164,45 +164,46 @@ This is a common issue that will encounter with permissions problems.
 - May require **chown node:node**
 
 - Change user from root to node.
-   -  USER node
+  - USER node
 - Set permissions on app dir.
-   - RUN mkdir app && chown -R node:node .
+  - RUN mkdir app && chown -R node:node .
 
 When you run **docker-compose exec** you will usually enter the container as the node user. If you ever want to change that you can use.
 
-   docker-compose exec -u root
+docker-compose exec -u root
 
 root user have access to anything.
 
 It great to have your applications using the **node** user instead of **root** user which is the default.
 
-- To enable the **node** user in you container we use the **user** command. 
-- Be cautious on the ordering problems of these line. 
-    - Command that need root user should be above the **USER** command.
-    - Creating the working directory of the app of permissions **node:node**
-     
-        RUN  app && chown -R node:node .
+- To enable the **node** user in you container we use the **user** command.
+- Be cautious on the ordering problems of these line.
 
-        USER node
+  - Command that need root user should be above the **USER** command.
+  - Creating the working directory of the app of permissions **node:node**
+
+    RUN app && chown -R node:node .
+
+    USER node
 
 - Also ensure you copied project is owned by **node user**.
-    - ensure consistency in permissions.
-    - COPY --chown=node:node . .
+  - ensure consistency in permissions.
+  - COPY --chown=node:node . .
 
 ##### Making Images Efficently
 
 We will focuss on build speeds and storage space.
 
-1. using a small *base image*.
+1. using a small _base image_.
 2. Line order matters. (due to cache-busting)
    - Line that dont change put them top.
-        - Expose
+     - Expose
 3. Copying twice.
-   - COPY package.json package-lock.json* ./
+   - COPY package.json package-lock.json\* ./
    - copy only the package.json and lockfile
    - run npm install
    - Copy everything else
-3. One *apt-get* per dockerfile and be uptop.
+4. One _apt-get_ per dockerfile and be uptop.
 
 example of a nice docker file
 
@@ -216,12 +217,13 @@ example of a nice docker file
   - We'll use nodemon in dev for file watch during developments
 - Docker manages app start, stop, resstart, healthcheck
 - Node multi-thread: Docker manages multiple "replicas"
-- One *npm/node* problem: They don't listen for proper shutdown signals by default.
+- One _npm/node_ problem: They don't listen for proper shutdown signals by default.
 
 ##### The truth About the PID 1 Problem.
 
 - PID 1 (Process Identifier) if the first process in a system (or container) AKA init
 - Init process in a container has two jobs
+
   - Reap zombie processes.
   - pass signals to sub-processes.
 
@@ -244,9 +246,11 @@ example of a nice docker file
 - Temp: use --init to fix ctrl-c for now
 - Workaround: add tini to your image.
 - Productions: your app captures SIGINT for proper exit.
+
   - docker run --init -d nodeapp
 
 - Add tini to your Dockerfile, then use it in CMD (permanent workaround)
+
   - ENTRYPOINT ["/sbin/tini", "--"]
   - CMD [ "node", "./bin/www" ]
 
@@ -262,9 +266,50 @@ example of a nice docker file
 - Install tine, start node with tini.
 - copy package/lock files first then npm, then copy.
 
+Tini is the simplest **init** you could think of. All Tini does is spawn a single child (Tini is meant to be run in a container), and wait for it to exit all the while reaping **zombies and performing signal forwarding**.
+
+#### Why Tini?
+
+Using Tini has several benefits:
+
+- It protects you from software that accidentally creates zombie processes. which can (over time!) starve you entire syste for PIDs
+- It ensures that the defautl signal handles work for the software you run in your Docker image. For example, with Tini, **SIGTERM** properly terminates your process even if you didn't explicitly install a signal handler for it.
+- It does so completely transparently! Docker images that work without Tini will work with Tin without any changes.
+
+1. Manual install of tini.
+
+Add Tini to your container, and make it executable. Then, just invoke Tini and pass your program and its arguments as arguments to Tini.
+
+```dockerfile
+FROM node:10.22-alpine
+
+EXPOSE 3000
+
+RUN apk add --no-cache tini
+
+WORKDIR /usr/src/app
+
+COPY  package.json package.lock*.json ./
+
+RUN  npm install && npm cache clean --force
+
+COPY . .
+
+# Tini is now available at /sbin/tini
+
+ENTRYPOINT ["/sbin/tini", "--"]
+
+CMD ["node", "app.js"]
+```
+
+2. Using Tini. Injected at runtime
+
+- If you are using **Docker 1.13 or greater**. Tini is included in Docker itself.
+  - just **pass the --init flag to docker run**
+
 ##### > Docker keeps all version tags around since deleting them would cause stuff in production to fail.
 
-##### Testing Graceful Shutdowns.
+##### Testing Graceful ehutdowns.
 
 - Use ./assignment-dockerfiles/
 - Run with tini built in, try to **ctrl-c**
@@ -272,3 +317,112 @@ example of a nice docker file
 - Remove EntryPoint , rebuild.
 - Add --init to run command, ctrl-c/stop
 - Bonus: add signal watch code.
+
+> #### Reminder. (practise point)
+
+> using the assingment-dockerfile folder
+
+- Building a container from a **dockerfile**
+  - docker build . -t assignment.
+- Running container Images with docker.
+  - docker run -p 8080:3000 assingment.
+- Running container in detached mode.
+  - docker run -d -p 8080:3000 assingment.
+  - The above command. produce a SHA1 text.
+- Stoping the background container using **sha1 text**.
+  - docker stop <sha1-text>
+- check programs running using (linux utilities)
+  - docker top <sha1-text>
+
+#### Advanced Dockerfiles with Multi-stage and Buildkit.
+
+- Multi-Stage builds.
+- Docker BuildKits.
+- Build A 3-stage Image.
+- SSH Agent In Builds
+
+##### Multi-stage Builds. (Artifact)
+
+- New feature in 17.06 (mid-2017)
+- Build Multiple Images from one file.
+- Those images can **From** each other.
+- COPY files between them.
+- Space + security benefits.
+
+example.
+
+- To build dev image for dev stage.
+  - docker build -t myapp .
+- To build prod image from prod stage.
+
+  - docker build -t myapp:prod --target prod .
+
+- Add a test stage that runs npm test.
+- Have CI build --target test stage before building prod.
+- Add npm install
+  --only=development to dev stage
+
+##### Building A 3-Stage Dockerfiles
+
+- Create a Docker from ./Multi-stage-dockerfile
+- Create three stages for prod, dev and test.
+- Prod has no devDependencies and runs node.
+- Dev includes devDep, runs nodemon.
+- Test has DevDep, runs npm test
+- Goals: don't repeat lines.
+
+```Dockerfile
+FROM node:10-slim as prod
+ENV NODE_ENV=production
+EXPOSE 3000
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --only=production && npm cach clean --force
+COPY . .
+CMD [ "node" ,"./bin/www"]
+
+FROM prod as dev
+ENV NODE_ENV=development
+RUN npm install --only=development
+CMD ["node_modules/nodemon/bin/nodemon.js", "./bin/www --inspect=0.0.0.0:9229" ]
+
+FROM dev as test
+ENV NODE_ENV=development
+RUN npm test
+
+```
+
+- The above _dockerfile_ has three stages **prod, dev and test**
+- To build the **prod** image.
+
+  - **docker build -t multistage --target prod . && docker run multistage**
+
+- To run the development image. (using tini to for grafull shutdown)
+
+  - **docker build -t multistage:dev --target dev . && docker run multistage --init -p 3000:3000 multistage:dev**
+
+- To run the test container layer.
+  - **docker build -t multistage:test --target test . && docker run --init -p 3000:3000 multistage:test**
+
+#### Cloud Native App Guidelines.
+
+- Follow 12factor.net priciples, especially
+  - use Environmental Variable for config.
+  - Log to stdout/stderr.
+  - Pin all version, even npm.
+  - Groceful exit SIGTERM/INIT
+- Create a _.dockerignore_
+- Containers are almost always distributed apps.
+- **Good news:** You get many of these by using Docker.
+- Lets focus on a few for Node.js
+
+#### 12 Factor: Config
+
+- **Heroku** wrote a highly respected guide to creating distributed apps.
+
+  - Twelve factors to consider when developing or designing distributed apps.
+
+- 12factor.net/config
+  - Store environment config in Environment Variable (env vars)
+  - Docker & Compose are great at this with multiple options.
+  - Old apps: Use CMD or ENTRYPOINT script with **envsubst** to pass env vars into conf files.
