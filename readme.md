@@ -617,3 +617,174 @@ Read the yaml in the said folder.
   - Example: **node-gyp**
 - Solution: add **node_modules** to **.dockerignore**
 - let's do this to **sails**
+- Before you do a **docker build** make sure you have a .dockerignore file.
+  - docker build -t sailsbret .
+
+##### node_modules in Bind-Mounts (folder: express)
+
+- Problem: we can't bind-mount node_modules content from host on macOs/Windows (diffrent arch)
+- Two potential Solutions:
+  1. Never use **npm i on host**
+  - run npm i in compose.
+  2. Move modules in image, hide modules from host.
+
+###### Solution 1, simple but less flexible:
+
+This solution assumes that you will be developing entirely in the container. This is what makes it less flexible.
+
+```yml
+version: "2.4"
+
+services:
+  express:
+    build: .
+    ports:
+      - 3000:3000
+    volumes:
+      - .:/app
+    environment:
+      - DEBUG=sample-express:*
+```
+
+- You can't **docker-compose up** until you've used **docker-compse run**
+- To install \*_node-modules_ using docker compose.
+  - docker-compose run express npm install
+
+**node_modules from the container** will be saved in the host.
+
+###### Solution 2.
+
+- Solution 2, more setup but flexible.
+  - I could develop, in either the host, or in the container. (What pleases at the time)
+- Move node_modules up a directory in Dockerfile.
+  - In the container we will use **node_modules** in the parent directory.
+- use empty volume to hide **node_modules** on **bind-mount**.
+
+  - This hide the **node_modules** from the host **npm install**
+
+- You can develop on both **windows** and **linux** without any side effects of node_modules.
+
+```dockerfile
+
+FROM node:10.15-slim
+
+ENV NODE_ENV=production
+
+WORKDIR /node
+
+COPY package.json package-lock*.json ./
+
+RUN npm install && npm cache clean --force
+
+WORKDIR /node/app
+
+COPY . .
+
+CMD ["node", "./bin/www"]
+```
+
+```yml
+version: "2.4"
+
+services:
+  express:
+    build: .
+    ports:
+      - 3000:3000
+    volumes:
+      - .:/node/app
+      - /node/app/node_modules
+    environments:
+      - DEBUG=sample-express:*
+```
+
+##### NPM, Yarn , and other Tools in Compose.
+
+- Two ways to run various tools inside the container.
+- docker-compose run: start a new container and run command/shell
+- docker-compose exec: run additional command/shell when the container is running
+
+##### File Monitoring and Node Auto Restart.
+
+- Use nodemon for compose file monitoring.
+- webpack-dev-server, etc. work the same.
+- Override Dockerfile via compose command.
+- If windows, enable polling.
+- create a **nodemon.yml** for advanced workflows (bower, webpack, parcel)
+
+```dockerfile
+FROM node:10.15-slim
+
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+COPY package.json package-lock*.json ./
+
+RUN npm install && npm cache clean --force
+
+ENV PATH /app/node_modules/.bin/:$PATH
+
+COPY . .
+
+CMD ["node", "./bin/www"]
+```
+
+```yml
+version: "2.4"
+
+services:
+  express:
+    build: .
+    command: /app/node_modules/.bin/nodemon ./bin/www
+    ports:
+      - 3000:3000
+    volumes:
+      - .:/app
+    environment:
+      - DEBUG=sample-express:*
+      - NODE_ENV=development
+```
+
+> Notes:
+
+- **NODE_ENV=developments** overrides the dockerfiles environments variable which is set to **production**. This ensures that every thing i need in a dev env in setup correctly.
+
+- docker-compose file is also used to override the default **command** to use nodemon.
+  - Also note that the full path of nodemon from the **node_modules** is used.
+    - This is because nodemon is not installed globally.We are using package.json so that we be able to control the version of nodemon.
+- Since at the **bind-mount** we bind the whole app directory. That means the **node_modules** are shared between the host and the container.
+  - don't npm install on the host. make use of docker compose.
+    - **docker-compose run express npm install nodemon --save-dev**
+      - express is the **service name** from the **docker-compose.yml** file.
+
+##### Startup Order and Dependencies.
+
+- problem: Multi-service apps start out of order, node might exit or cylec.
+- Multi-container apps needs:
+  - Dependency awareness
+  - Name resolution (DN)
+  - Connection failure handling.
+
+###### Dependecy Awareness.
+
+- **depends_on**: when "up X", start Y first
+- Fixes name resolution issues with "can't resolve <service_name>
+- Only for compose, not Orchestration.
+- Compose YAML v2: works with healthchecks like a "wait for script".
+
+###### Connection Failure Handling
+
+- _restart_: on-failure
+  - Good: help slow db startup and Node.js failing. Better: depends_on.
+  - Bad: could spike Cpu with restart cycling.
+- **Solution** build connection timeouts, buffer and retries in your apps.
+
+###### HealthChecks for depends_on.
+
+- **depends_on**: is only dependency control by default.
+- Add v2 healthchecks for true "**wait_for**"
+- Let's see some examples
+  - Mongo
+  - Postgress/MySql
+  - web
