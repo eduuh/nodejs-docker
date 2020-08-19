@@ -1432,8 +1432,7 @@ travis ci , jenkins , Azure devops
 - Its better to split the --run-- command into multiple steps.
   - It easier for debugging.
 
-
-##### Ultimate Node.js Dockerfile 
+##### Ultimate Node.js Dockerfile
 
 You are the Node.js developer for the "Dog vs. Cat voting app" project.
 You are given a basic Dockerfile and the source code for the "result"
@@ -1446,24 +1445,24 @@ of the "result" app using all the things you learned in this section.
 ## The finished Dockerfile should include
 
 - Create a multi-stage Dockerfile that supports specific images for
-production, testing, and development.
+  production, testing, and development.
 - devDependencies should not exist in production image.
 - Use `npm ci` to install production dependencies.
 - Use Scenario 1 for setting up node_modules (the simple version).
 - Set NODE_ENV properly for dev and prod.
 - The dev stage should run nodemon from devDependencies. Either by
-updating the `$PATH` or hard-coding the path to nodemon.
+  updating the `$PATH` or hard-coding the path to nodemon.
 - Edit docker-compose.yml to target the dev stage.
 - Add LABELS from OCI standard (values are up to you) to all images.
 - Add `npm config list` output before running `npm install`.
 - Create a test stage that runs `npm audit`.
 - `./tests` directory should only exist in test image.
-  - This is a tricky on to  configure.
+  - This is a tricky on to configure.
     - This means that you might need an image that does clean-up.
 - Healthchecks should be added for production image.
 - Prevent repeating costly commands like npm installs or apt-get.
 - Only `COPY . .` source code once, then `COPY --from` to get it
-into other stages.
+  into other stages.
 
 ## BONUS
 
@@ -1474,26 +1473,26 @@ into other stages.
   - Add tini to images so containers will receive shutdown signals.
   - Enable the non-root node user for all dev/prod images.
   - You might need root user for test or scanning images depending
-  on what you're doing (test and find out!)
+    on what you're doing (test and find out!)
 
 ## Things to test once finished to ensure it's working
 
 - Build all stages as their own tag. ultimatenode:test should be
-bigger then ultimatenode:prod
+  bigger then ultimatenode:prod
 - All builds should finish.
 - Run dev/test/prod images, and ensure they start as expected.
 - `docker-compose up` should work and you can vote at
-http://localhost:5000 and see results at http://localhost:5001.
+  http://localhost:5000 and see results at http://localhost:5001.
 - Ensure prod image doesn't have unnecessary files by running
-`docker run -it <imagename>:prod bash` and checking it:
+  `docker run -it <imagename>:prod bash` and checking it:
   - ls contents of `/app/node_modules/.bin`, it should not contain
-  `nodemon` or devDependencies.
+    `nodemon` or devDependencies.
   - ls contents of `/app` in prod image, it should not contain
-  `./tests` directory.
+    `./tests` directory.
 - After `docker-compose up`, run
-`docker-compose exec result ./tests/tests.sh` to perform a
-functional test across containers. After a moment delay,
-it should pass.
+  `docker-compose exec result ./tests/tests.sh` to perform a
+  functional test across containers. After a moment delay,
+  it should pass.
 
 Good Luck!
 
@@ -1505,19 +1504,14 @@ Good Luck!
 
 ### Test commands
 
-- Build the development images.
- -**docker build -t ultimatenode:dev --target dev .**
-- Build the production image.
- -**docker build -t ultimatenode:prod --target prod .**
-- Start development using docker-compose.
- -**docker-compose up**
-- Start docker-compose in the background.
- -**docker-compose up -d**
+- Build the development images. -**docker build -t ultimatenode:dev --target dev .**
+- Build the production image. -**docker build -t ultimatenode:prod --target prod .**
+- Start development using docker-compose. -**docker-compose up**
+- Start docker-compose in the background. -**docker-compose up -d**
 
 ### Bonus
 
-- Enable buildkit.
- -**DOCKER_BUILDKIT=1 docker build -t ultimatenode:dev --target dev .**
+- Enable buildkit. -**DOCKER_BUILDKIT=1 docker build -t ultimatenode:dev --target dev .**
 - Add tini to the Images so containers will receive shutdown signals.
   - [Refer tini github](https://github.com/krallin/tini) copy the line.
 
@@ -1535,4 +1529,272 @@ ENTRYPOINT ["/tini", "--"]
 - Enable the non-root node user for all dev/prod images.
   - non-root user don't usually have permissions to low ports.
     - low port are recerved for roots user and applications.
-  - Use ports higher that 
+  - Use ports higher that. change port 80 to 8080
+    - set the port env variable to 8080. nodejs will pick it up.
+
+#### Running Production Node.js Containers.
+
+- Running in Production.
+- HTTP Proxies.
+- When To Orchestate.
+- Relacing Running Apps.
+- swarm/kubenetes.
+
+#### Multi-Threaded Concerns.
+
+- Node is usually single threaded.
+- Use multiple replicas, not PM2/forever.
+- Start with 1-2 replicas per CPU.
+- Unit testing = single replica. Integration testing - multiple replicas.
+
+#### Why Not Compose In Production? **docker-compose cli**
+
+- Only understands a single server (engine).
+- Doesn't understand uptime or healthchecks.
+- Swarm is easy and solve most use cases.
+- Single server? use swarm
+- Kubernetes not ideal for 1-5 servers. Try cloud hosted.
+  - amazon , digital ocean, azure.
+
+#### Node.js with Proxies.
+
+- Common: many HTTPS containers neet to listen on 80/443
+- **Nginx** and **HAProxy** have lots of options.
+- **Traefik** is the new kid, full of cool feauteres.
+
+##### Cluster with External Proxy.(for port traffic)
+
+##### Connection During Container Replacement. (./graceful-shutdown)
+
+- Add SIGTERM code to all Node.js apps.
+- Prevents killings app, but not graceful connection migration.
+- Check godaddy/ternminus for easier **hc + shutdown**.
+
+#### Container Replacement Process.
+
+- Shutdown wait defaults: Docker/Swarm: 10s, kubernetes: 30s.
+- Kubernetes/Swarm use healthchecks differently for ingress LB.
+- Give shutdown waits longer that HTTP long polling.
+- HTTP: use **stoppables** to track open connections.
+
+#### Node.js with Orchestration.
+
+- Multi-container , single Image.
+- Startup "ready" state: **healthchecks**.
+- Multi-container client state sharing (don't use in-memory state)
+- Shutdown cleanu: re-connect clients, closde DB, fail readiness (K8s)
+
+##### Voting App, Cluster-Ready. (folder: result-orchestration)
+
+- Kubernetes and Swarm-ready version.
+- Healthcheck/Readiness wait for DB .
+- Readiness re-checks DB connection.
+- **socket.io** uses redis.
+- **Stoppable** for cleanup.
+
+##### Node.js with Docker Swarm. (sample-swarm)
+
+- Example of Node.js app stack.
+- Has cluster features under "deploy"
+- replicas, update_config
+- stop_grace_period.
+
+```yml
+version: '3.7'
+
+# for more swarm examples see
+# https://github.com/BretFisher/dogvscat
+#
+# NOTE: requires port 80, 443, and 8080 open on Docker host
+# Use chrome with hostnames like http://result.localhost
+
+x-default-opts:
+  &default-opts
+  logging:
+    options:
+      max-size: "1m"
+
+
+services:
+
+  traefik:
+    <<: *default-opts
+    image: traefik:1.7-alpine
+    networks:
+      - traefik-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: host
+      - target: 8080
+        published: 8080
+        protocol: tcp
+        mode: ingress # traefik dashboard
+    command:
+      - --docker
+      - --docker.swarmMode
+      - --docker.domain=traefik
+      - --docker.network=traefik-proxy
+      - --docker.watch
+      - --api
+      - --defaultentrypoints=http,https
+    deploy:
+      mode: global
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.port=8080
+        - traefik.frontend.rule=Host:traefik.localhost
+
+  vote:
+    <<: *default-opts
+    image: bretfisher/examplevotingapp_vote
+    networks:
+      - frontend
+      - traefik-proxy
+    deploy:
+      replicas: 2
+      labels:
+        - traefik.port=80
+        - traefik.frontend.rule=Host:vote.localhost
+
+  result:
+    <<: *default-opts
+    image: bretfisher/examplevotingapp_result:stoppable
+    networks:
+      - backend
+      - traefik-proxy
+    stop_grace_period: 5m
+    deploy:
+      replicas: 2
+      labels: [APP=VOTING]
+      update_config:
+        parallelism: 1
+        failure_action: rollback
+        order: start-first
+      labels:
+        - traefik.port=80
+        - traefik.frontend.rule=Host:result.localhost
+        - traefik.backend.loadbalancer.stickiness=true
+
+  worker:
+    <<: *default-opts
+    image: bretfisher/examplevotingapp_worker:java
+    networks:
+      - frontend
+      - backend
+    deploy:
+      mode: replicated
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+
+  redis:
+    <<: *default-opts
+    image: redis:alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - frontend
+    deploy:
+      endpoint_mode: dnsrr
+
+  db:
+    <<: *default-opts
+    image: postgres:9.4
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    networks:
+      - backend
+    deploy:
+      endpoint_mode: dnsrr
+
+networks:
+  frontend:
+  backend:
+  traefik-proxy:
+    name: traefik-proxy
+
+volumes:
+  db-data:
+  redis-data:
+```
+
+#### State of ARM + Docker for Node.
+
+- ARM processors are used everywhere. -embedded devices.
+  - Amazon have ARM servers.
+- But it's hard to develop on ARM.
+  - develop rasberrypi
+- **April 2019**: Docker + ARM partnership.
+  - How nasa used docker for rockets testing
+- Docker Desktop runs ARM now!
+- Node is great on ARM.
+- Docker is the easiest way to develop and deploy on arm solutions.
+
+##### Run Node ARM containers for Dev.
+
+- Easy button: change the **FROM** images to **arm64v8/node:<tag>**
+- This forces macOS/Win to run ARM.
+- Use **QEMU** "proc emulator"
+- Build/run like normal.
+- Mix with x86 in compose.
+
+- visit dockerhub node page.
+  - scroll down to **supported architecture**.
+    - click on **arm64v8/node:10-alpine**
+      - Takes you to the arm based node version.
+
+```dockerfile
+FROM arm64v8/node:10-alpine
+
+EXPOSE 3000
+
+WORKDIR /usr/src/app
+
+COPY package.json package-lock.json* ./
+
+RUN npm install && npm cache clean --force
+
+COPY . .
+
+CMD [ "node", "./bin/www" ]
+```
+
+- To check the architecture of an image use the command.
+  - **docker image inspect arm64v8/node:10-alpine | grep Arch**
+- build the images with.
+  - **docker build -t arm64node .**
+
+##### Run Node ARM Containers for Prod.
+
+- AWS A1 Instances (Graviton Processors.)
+- Testing my Iot/Embedded code.
+- Docker Hub doesn't build **arm64** images.
+- Or does it? (QEMU hack)
+- Build your own CI with QEMU.
+- Swarm just works!
+
+#### The Future: Making ARM Easier.
+
+- **ARM**+ Docker partnership will make this easier.
+- **Build** multi-arch in one command.
+- Store multi-arch images in single repo.
+- Easire to know which arch you're running locally.
+
+### Bretfisher.
+
+-
